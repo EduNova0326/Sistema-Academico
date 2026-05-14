@@ -393,8 +393,8 @@ Archivos clave:
 
 ## Autor del desarrollado y Administrador del proyecto
 
-- Autor del desarrollo: **JOSE LUIS RIJO RODRIGUEZ **
-- Autor / administrador del proyecto (Rijo): **Rijo**
+- Autor del desarrollo: **Jose Luis Rijo Rodriguez**
+- Administrador del proyecto: **Jose Luis Rijo Rodriguez**
 
 ## Entregables (lo que se entrega en USB)
 
@@ -430,4 +430,3 @@ Presentacion:
 ## Presentacion (Canva)
 
 - https://www.canva.com/d/_SuLJCe8cgU8vMQ
-
