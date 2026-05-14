@@ -393,7 +393,7 @@ Archivos clave:
 
 ## Autor del desarrollado y Administrador del proyecto
 
-- Autor del desarrollo: **Jose Luis Rijo Rodriguez**
+- Autor del desarrollo: **Jose Emmanuel Pichardo Alvarez**
 - Administrador del proyecto: **Jose Luis Rijo Rodriguez**
 
 ## Entregables (lo que se entrega en USB)

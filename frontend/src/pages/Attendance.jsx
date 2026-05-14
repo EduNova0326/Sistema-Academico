@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabaseClient.js'
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
 import * as XLSX from 'xlsx-js-style'
 import { ACADEMIC_SUBJECT_OPTIONS, buildAcademicCourse } from '../data/projectOptions.js'
 import { studentsService } from '../services/academicServices.js'
@@ -124,7 +126,7 @@ export function Attendance({ showToast, onNavigate }) {
     }
   }
 
-  /* Exportacion PDF desactivada por solicitud del usuario.
+
   const exportPDF = async () => {
     setExporting(true)
     try {
@@ -186,7 +188,7 @@ export function Attendance({ showToast, onNavigate }) {
       setExporting(false)
     }
   }
-  */
+
 
   const exportExcel = async () => {
     setExporting(true)
@@ -361,7 +363,7 @@ export function Attendance({ showToast, onNavigate }) {
           <a onClick={() => onNavigate('dashboard')}>Inicio</a><span>/</span><span>Asistencia</span>
         </div>
         <h2>Control de Asistencia</h2>
-        <p>Registra la asistencia diaria. Exporta reportes en Excel.</p>
+        <p>Registra la asistencia diaria. Exporta reportes en PDF o Excel.</p>
       </div>
 
       <div className="stats-grid">
@@ -404,7 +406,7 @@ export function Attendance({ showToast, onNavigate }) {
                   borderRadius: 8,
                 }}
               >
-                {pct >= 80 ? '✓ Buena asistencia' : pct >= 60 ? '⚠ Asistencia regular' : '✕ Asistencia baja'}
+                {pct >= 80 ? 'Buena asistencia' : pct >= 60 ? 'Asistencia regular' : 'Asistencia baja'}
               </span>
             )}
           </div>
@@ -414,6 +416,9 @@ export function Attendance({ showToast, onNavigate }) {
             </button>
             <button className="btn btn-sm btn-secondary" onClick={markAllAbsent}>
               <i className="fas fa-times" />Todos ausentes
+            </button>
+            <button className="btn btn-sm btn-secondary" onClick={exportPDF} disabled={exporting || att.length === 0} title="Exportar PDF">
+              <i className="fas fa-file-pdf" style={{ color: 'var(--danger)' }} />PDF
             </button>
             <button className="btn btn-sm btn-secondary" onClick={exportExcel} disabled={exporting || att.length === 0} title="Exportar Excel">
               <i className="fas fa-file-excel" style={{ color: 'var(--success)' }} />Excel

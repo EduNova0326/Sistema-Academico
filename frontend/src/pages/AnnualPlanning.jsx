@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import Modal from '../components/Modal.jsx'
 import { supabase } from '../services/supabaseClient.js'
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
 import { recordAuditEvent } from '../services/auditLogger.js'
 import {
   buildActivitySummary,
@@ -19,6 +21,41 @@ const normalizePlainText = (value) => {
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
     .trim()
+}
+
+const sanitizeForPdf = (value) => {
+  // jsPDF (fonts base) no siempre renderiza bien simbolos/bullets, asi que los normalizamos.
+  return normalizePlainText(value)
+    .replace(/[✓✔]/g, '')
+    .replace(/[⚠]/g, '')
+    .replace(/[✕✖]/g, '')
+    .replace(/[•·]/g, '-')
+    .replace(/[–—]/g, '-')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+}
+
+const svgToPngDataUrl = async (svgText, width = 220, height = 220) => {
+  if (typeof window === 'undefined') return null
+
+  return await new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        ctx.clearRect(0, 0, width, height)
+        ctx.drawImage(img, 0, 0, width, height)
+        resolve(canvas.toDataURL('image/png'))
+      } catch {
+        resolve(null)
+      }
+    }
+    img.onerror = () => resolve(null)
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}`
+  })
 }
 
 const STATUS_MAP = {
@@ -916,7 +953,6 @@ export function AnnualPlanning({ showToast, onNavigate }) {
     { label: 'Horas por semana', value: planMeta.hours_per_week ? `${planMeta.hours_per_week} h` : 'Sin definir', icon: 'fa-clock' },
   ]
 
-  /* Exportacion PDF desactivada por solicitud del usuario.
   const exportMatrixPdf = async () => {
     try {
       // Export institucional (formato tipo "matriz" del centro):
@@ -953,39 +989,110 @@ export function AnnualPlanning({ showToast, onNavigate }) {
       const ucLabel = safeKind === 'academica' ? 'Competencia / Objetivo' : 'Unidad de competencia'
       const ucCodeLabel = safeKind === 'academica' ? 'Codigo (opcional)' : 'Codigo UC'
 
-      // Encabezado centrado (estilo institucional).
+      // Encabezado (con logo) - estilo institucional.
+      // Logo real del MINERD (opcional).
+      // Para activarlo: coloca el archivo en `frontend/public/minerd_logo.png`.
+      // Si no existe, el PDF se genera igual, solo sin logo.
+      let logoDataUrl = null
+      try {
+        const resp = await fetch('/minerd_logo.png', { cache: 'no-store' })
+        if (!resp.ok) throw new Error('logo-not-found')
+        const blob = await resp.blob()
+        const objectUrl = URL.createObjectURL(blob)
+
+        logoDataUrl = await new Promise((resolve) => {
+          const img = new Image()
+          img.onload = () => {
+            try {
+              const canvas = document.createElement('canvas')
+              canvas.width = 220
+              canvas.height = 220
+              const ctx = canvas.getContext('2d')
+              ctx.clearRect(0, 0, 220, 220)
+              ctx.drawImage(img, 0, 0, 220, 220)
+              URL.revokeObjectURL(objectUrl)
+              resolve(canvas.toDataURL('image/png'))
+            } catch {
+              URL.revokeObjectURL(objectUrl)
+              resolve(null)
+            }
+          }
+          img.onerror = () => resolve(null)
+          img.src = objectUrl
+        })
+      } catch {
+        logoDataUrl = null
+      }
+
+      if (logoDataUrl) {
+        doc.addImage(logoDataUrl, 'PNG', pageW / 2 - 60, 18, 120, 120)
+      }
+
+      let headerY = logoDataUrl ? 152 : 86
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(9)
+      doc.setTextColor(15, 23, 42)
+      doc.text('GOBIERNO DE LA REPUBLICA DOMINICANA', pageW / 2, headerY, { align: 'center' })
+      headerY += 12
+      doc.setTextColor(220, 38, 38)
+      doc.text('EDUCACION', pageW / 2, headerY, { align: 'center' })
+      headerY += 12
+      doc.setTextColor(15, 23, 42)
+      doc.setFontSize(9)
+      doc.setFont('helvetica', 'normal')
+      doc.text('Direccion General de Educacion Secundaria', pageW / 2, headerY, { align: 'center' })
+      headerY += 12
+      doc.text('Direccion de Educacion Tecnico Profesional', pageW / 2, headerY, { align: 'center' })
+      headerY += 14
+
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(11)
-      doc.text(planMeta.institution_name || 'INSTITUCION EDUCATIVA', pageW / 2, 54, { align: 'center' })
+      doc.text(sanitizeForPdf(planMeta.institution_name || 'INSTITUCION EDUCATIVA'), pageW / 2, headerY, { align: 'center' })
+      headerY += 16
       doc.setFontSize(10)
-      doc.text('PLANIFICACION ANUAL BAJO ENFOQUE POR COMPETENCIAS', pageW / 2, 70, { align: 'center' })
+      doc.text('PLANIFICACION ANUAL BAJO ENFOQUE POR COMPETENCIAS', pageW / 2, headerY, { align: 'center' })
+      headerY += 14
       doc.setFontSize(9)
       doc.setFont('helvetica', 'normal')
       doc.text(
         `MATRIZ DE PLANIFICACION POR RESULTADO DE APRENDIZAJE (RA) - ${kindLabel.toUpperCase()}`,
         pageW / 2,
-        86,
+        headerY,
         { align: 'center' },
       )
+      headerY += 14
 
-      // Bloque de datos generales (una linea tipo ficha)
-      const topInfo = [
-        `Curso: ${course}`,
+      // Linea separadora
+      doc.setDrawColor(17, 24, 39)
+      doc.setLineWidth(0.8)
+      doc.line(marginX, headerY, pageW - marginX, headerY)
+      headerY += 12
+
+      // Bloque de datos generales (formato tipo ficha)
+      const line1 = [
+        `Curso: ${sanitizeForPdf(course)}`,
         `Ano: ${year}`,
-        `${moduleLabel}: ${planMeta.module_name || 'Sin definir'}`,
-        `${moduleCodeLabel}: ${planMeta.module_code || 'Sin definir'}`,
-        `Docente: ${planMeta.teacher_name || 'Sin definir'}`,
-        `${ucCodeLabel}: ${planMeta.uc_code || 'Sin definir'}`,
+        `${moduleLabel}: ${sanitizeForPdf(planMeta.module_name || 'Sin definir')}`,
+        `${moduleCodeLabel}: ${sanitizeForPdf(planMeta.module_code || 'Sin definir')}`,
+      ].join('   |   ')
+      const line2 = [
+        `Docente: ${sanitizeForPdf(planMeta.teacher_name || 'Sin definir')}`,
+        `${ucCodeLabel}: ${sanitizeForPdf(planMeta.uc_code || 'Sin definir')}`,
+        `${ucLabel}: ${sanitizeForPdf(planMeta.uc_name || 'Sin definir')}`,
       ].join('   |   ')
 
+      doc.setTextColor(15, 23, 42)
       doc.setFontSize(8)
-      doc.text(topInfo, marginX, 104, { maxWidth: contentW })
+      const lineHeight = 10
+      const line1Lines = doc.splitTextToSize(line1, contentW)
+      doc.text(line1Lines, marginX, headerY)
+      headerY += line1Lines.length * lineHeight
 
-      // UC / Competencia (texto)
-      const ucText = `${ucLabel}: ${normalizePlainText(planMeta.uc_name || 'Sin definir')}`
-      doc.text(ucText, marginX, 118, { maxWidth: contentW })
+      const line2Lines = doc.splitTextToSize(line2, contentW)
+      doc.text(line2Lines, marginX, headerY + 2)
+      headerY += (line2Lines.length * lineHeight) + 6
 
-      let cursorY = 132
+      let cursorY = headerY + 8
 
       const borderColor = [0, 0, 0]
       const headerFill = [243, 244, 246]
@@ -1002,8 +1109,8 @@ export function AnnualPlanning({ showToast, onNavigate }) {
         ensureSpace(220)
 
         // Caja RA (titulo superior)
-        const raLabel = `${item.code ? `${item.code}: ` : ''}${normalizePlainText(item.title || 'Resultado de aprendizaje')}`
-        const raDesc = normalizePlainText(item.desc || '')
+        const raLabel = `${item.code ? `${item.code}: ` : ''}${sanitizeForPdf(item.title || 'Resultado de aprendizaje')}`
+        const raDesc = sanitizeForPdf(item.desc || '')
         const raWeeks = item.weekStart && item.weekEnd ? `Semanas ${item.weekStart}-${item.weekEnd}` : ''
         const raHours = item.hours ? `${item.hours} horas` : ''
         const raDomain = item.domainRA ? `Nivel de dominio RA: ${item.domainRA}` : 'Nivel de dominio RA: Sin definir'
@@ -1018,6 +1125,12 @@ export function AnnualPlanning({ showToast, onNavigate }) {
             lineWidth: 1,
             valign: 'top',
             overflow: 'linebreak',
+            textColor: [17, 24, 39],
+          },
+          headStyles: {
+            fillColor: headerFill,
+            textColor: [17, 24, 39],
+            fontStyle: 'bold',
           },
           head: [[
             { content: 'RESULTADO DE APRENDIZAJE (RA)', colSpan: 2, styles: { fillColor: headerFill, fontStyle: 'bold' } },
@@ -1045,15 +1158,15 @@ export function AnnualPlanning({ showToast, onNavigate }) {
 
         const domEC = item.domainEC || 'Sin definir'
 
-        const monthsOrPeriod = normalizePlainText(item.activityPeriod || '')
-        const actividadesEA = normalizePlainText(item.learningActivities || '')
-        const evaluacion = normalizePlainText(item.evaluationActivities || '')
-        const instrumentos = normalizePlainText(item.evaluationInstruments || '')
+        const monthsOrPeriod = sanitizeForPdf(item.activityPeriod || '')
+        const actividadesEA = sanitizeForPdf(item.learningActivities || '')
+        const evaluacion = sanitizeForPdf(item.evaluationActivities || '')
+        const instrumentos = sanitizeForPdf(item.evaluationInstruments || '')
 
         const contenidos = [
-          `Conceptuales: ${normalizePlainText(item.conceptualContent || '')}`,
-          `Procedimentales: ${normalizePlainText(item.proceduralContent || '')}`,
-          `Actitudinales: ${normalizePlainText(item.attitudinalContent || '')}`,
+          `Conceptuales: ${sanitizeForPdf(item.conceptualContent || '')}`,
+          `Procedimentales: ${sanitizeForPdf(item.proceduralContent || '')}`,
+          `Actitudinales: ${sanitizeForPdf(item.attitudinalContent || '')}`,
         ].filter(Boolean).join('\n')
 
         autoTable(doc, {
@@ -1066,6 +1179,12 @@ export function AnnualPlanning({ showToast, onNavigate }) {
             lineWidth: 1,
             valign: 'top',
             overflow: 'linebreak',
+            textColor: [17, 24, 39],
+          },
+          headStyles: {
+            fillColor: headerFill,
+            textColor: [17, 24, 39],
+            fontStyle: 'bold',
           },
           head: [[
             { content: 'Elemento de Capacidad (EC)', styles: { fillColor: headerFill, fontStyle: 'bold' } },
@@ -1123,7 +1242,7 @@ export function AnnualPlanning({ showToast, onNavigate }) {
       showToast('error', 'Error al exportar PDF de la matriz')
     }
   }
-  */
+
 
   return (
     <section>
@@ -1181,6 +1300,9 @@ export function AnnualPlanning({ showToast, onNavigate }) {
             <button className="btn btn-secondary" onClick={() => setTemplateModal(true)}><i className="fas fa-layer-group" />Aplicar plantilla</button>
             <button className="btn btn-secondary" onClick={() => setCModal(true)}><i className="fas fa-copy" />Copiar periodo</button>
             <button className="btn btn-secondary" onClick={() => setVModal(true)}><i className="fas fa-history" />Versiones</button>
+            <button className="btn btn-secondary" onClick={exportMatrixPdf} title="Descargar matriz institucional en PDF">
+              <i className="fas fa-file-pdf" />Exportar PDF
+            </button>
             <button className="btn btn-primary" onClick={openAdd}><i className="fas fa-plus" />Agregar RA</button>
           </div>
         </div>
